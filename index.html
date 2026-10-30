@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fruit Freshness Checker</title>
+<style>
+  :root{--bg:#f6f7f4;--card:#fff;--ink:#1d2a22;--mute:#5d6b62;--line:#e2e6df;--ok:#2e7d32;--warn:#c77700;--bad:#c62828;--accent:#2e7d32}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:640px;margin:0 auto;padding:16px}
+  h1{font-size:22px;margin:4px 0 2px}
+  .sub{color:var(--mute);margin:0 0 14px;font-size:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  label{font-weight:600;font-size:14px;display:block;margin-bottom:6px}
+  select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);font-size:16px;background:#fff}
+  .btn{display:block;width:100%;padding:14px;border:0;border-radius:12px;background:var(--accent);color:#fff;font-size:17px;font-weight:600;text-align:center;cursor:pointer;margin-top:12px}
+  .btn:disabled{background:#9db8a0}
+  .btn.ghost{background:#eef2ec;color:var(--ink);font-size:14px;padding:10px;margin-top:8px}
+  input[type=file]{display:none}
+  #status{font-size:14px;color:var(--mute);margin-top:10px;min-height:20px}
+  #status.err{color:var(--bad);font-weight:600}
+  #result{display:none}
+  .verdict{display:flex;align-items:center;gap:12px}
+  .badge{font-size:40px;line-height:1}
+  .vt{font-size:22px;font-weight:700}
+  .vs{color:var(--mute);font-size:14px}
+  .meter{height:12px;background:#e9ece7;border-radius:8px;overflow:hidden;margin:12px 0 4px}
+  .meter>div{height:100%;border-radius:8px;transition:width .4s}
+  .score{font-size:13px;color:var(--mute)}
+  ul.cues{list-style:none;padding:0;margin:8px 0 0}
+  ul.cues li{padding:9px 0;border-top:1px solid var(--line);display:flex;gap:10px;font-size:15px}
+  ul.cues li:first-child{border-top:0}
+  .ic{width:22px;flex:0 0 22px;text-align:center}
+  .t-ok .ic{color:var(--ok)} .t-warn .ic{color:var(--warn)} .t-bad .ic{color:var(--bad)} .t-na .ic{color:var(--mute)}
+  .t-na{color:var(--mute)}
+  canvas{width:100%;height:auto;border-radius:10px;background:#ddd;display:block}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--mute);margin-top:8px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+  details summary{cursor:pointer;font-weight:600;font-size:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  td{padding:4px 0;border-top:1px solid var(--line)} td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  .tips{font-size:14px;color:var(--mute);margin:0;padding-left:18px}
+  .small{font-size:12px;color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+  <h1>🍎 Fruit Freshness Checker</h1>
+  <p class="sub">Photo on the grid paper with 4 black squares. No machine learning: only measurements and rules.</p>
+
+  <div class="card">
+    <label for="fruit">Which fruit is it?</label>
+    <select id="fruit">
+      <option value="auto">Not sure: guess it for me</option>
+      <option value="apple">Apple</option>
+      <option value="banana">Banana</option>
+      <option value="capsicum">Capsicum</option>
+      <option value="cucumber">Cucumber</option>
+      <option value="lemon">Lemon</option>
+      <option value="orange">Orange</option>
+      <option value="tomato">Tomato</option>
+    </select>
+    <label class="btn" id="pickBtn" for="file">📷 Take or choose a photo</label>
+    <input id="file" type="file" accept="image/*">
+    <div id="status">Loading the detector (one time, about 10 MB)…</div>
+  </div>
+
+  <div id="result">
+    <div class="card">
+      <div class="verdict"><div class="badge" id="vBadge"></div><div><div class="vt" id="vTitle"></div><div class="vs" id="vSub"></div></div></div>
+      <div class="meter"><div id="vBar"></div></div>
+      <div class="score" id="vScore"></div>
+    </div>
+    <div class="card">
+      <strong>What the checker saw</strong>
+      <ul class="cues" id="cues"></ul>
+    </div>
+    <div class="card">
+      <canvas id="view"></canvas>
+      <div class="legend">
+        <span><i style="background:#ff3b30"></i>dark spots</span>
+        <span><i style="background:#00e5ff"></i>wrinkles / creases</span>
+        <span><i style="background:#ff2bd6"></i>possible mould</span>
+        <span><i style="background:#39ff14"></i>fruit outline</span>
+      </div>
+    </div>
+    <div class="card">
+      <details><summary>Numbers (for checking and tuning)</summary>
+        <table id="nums"></table>
+        <button class="btn ghost" id="copyBtn">Copy numbers</button>
+      </details>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>For a good photo</strong>
+    <ul class="tips">
+      <li>Flat paper, all 4 black squares fully visible.</li>
+      <li>Soft white daylight. No coloured lamps, no hand or shadow on the fruit.</li>
+      <li>Keep the fruit away from the squares. Turn the fruit to show its worst side.</li>
+    </ul>
+    <p class="small" style="margin-top:10px">This is a camera-based estimate. It cannot feel firmness or see inside the fruit. When in doubt, smell it and check it by hand.</p>
+  </div>
+</main>
+
+<script>
+/* ============================================================
+   CONFIG: every number you may want to tune is here.
+   Sizes are in centimetres (the sheet is straightened to 40 px = 1 cm).
+   ============================================================ */
+const PX = 40, SW = 560, SH = 920;           // straightened sheet: 14 x 23 cm
+const CFG = {
+  marker: { thr:[25,35,45,55,70], winW:0.35, winH:0.25, minFill:0.75, minAsp:0.7, minRel:0.0003, maxRel:0.02 },
+  // holeCm2: pale mould patches look like paper, so enclosed holes up to this size are filled back in
+  seg:    { chroma:15, darkDrop:70, eraseCm:1.5, minCm2:5, maxCm2:200, holeCm2:6 },
+  skin:   { erodeCm:0.5, minCm2:4 },
+  spot:   { drop:30, minBlobCm2:0.10, edgeShare:0.6 },
+  wrinkle:{ sigma:2.5, thr:0.35, ratio:0.4, minLenCm:0.8, maxThickCm:0.35, extraErodeCm:0.25 },
+  mould:  { chromaFrac:0.45, lightRise:20, minBlobCm2:0.4, minSkinChroma:20 },
+  grade:  { fresh:75, ok:50, old:30 }
+};
+
+const FRUITS = {
+  lemon:    { label:'Lemon',    emoji:'🍋', width:[3.3,7],   aspect:[1,1.9], cols:['yellow','green'], main:['yellow'] },
+  banana:   { label:'Banana',   emoji:'🍌', width:[2.8,4.5], aspect:[3,8],   cols:['yellow','green'], main:['yellow','green'] },
+  cucumber: { label:'Cucumber', emoji:'🥒', width:[3,5.5],   aspect:[2.2,7], cols:['green'], main:['green'] },
+  apple:    { label:'Apple',    emoji:'🍎', width:[5.5,9.5], aspect:[1,1.3], cols:['red','green','yellow','orange'], main:['red','green','yellow'] },
+  tomato:   { label:'Tomato',   emoji:'🍅', width:[4.5,9],   aspect:[1,1.3], cols:['red','green','orange'], main:['red'] },
+  orange:   { label:'Orange',   emoji:'🍊', width:[6,9.5],   aspect:[1,1.3], cols:['orange','yellow','green'], main:['orange'] },
+  capsicum: { label:'Capsicum', emoji:'🫑', width:[5,10],    aspect:[1,1.9], cols:['red','green','yellow','orange'], main:['red','green','yellow'] }
+};
+
+/* ============================================================
+   Small helpers
+   ============================================================ */
+class UserError extends Error {}
+function Scope(){ const l=[]; return { m(x){ l.push(x); return x; }, free(){ l.forEach(o=>{ try{o.delete();}catch(e){} }); l.length=0; } }; }
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const med=a=>{ if(!a.length) return 0; const b=Float32Array.from(a).sort(); return b[b.length>>1]; };
+const kern=(S,n)=>S.m(cv.getStructuringElement(cv.MORPH_ELLIPSE,new cv.Size(n,n)));
+function matU8(S,arr){ const m=S.m(new cv.Mat(SH,SW,cv.CV_8UC1)); m.data.set(arr); return m; }
+function matF(S,arr){ const m=S.m(new cv.Mat(SH,SW,cv.CV_32FC1)); m.data32F.set(arr); return m; }
+function blurF(S,m,sigma){ const d=S.m(new cv.Mat()); cv.GaussianBlur(m,d,new cv.Size(0,0),sigma,sigma,cv.BORDER_REPLICATE); return d; }
+function comps(S,m){
+  const labels=S.m(new cv.Mat()), stats=S.m(new cv.Mat()), cent=S.m(new cv.Mat());
+  const n=cv.connectedComponentsWithStats(m,labels,stats,cent,8,cv.CV_32S);
+  return { n, labels:labels.data32S, stats:stats.data32S };
+}
+function largestOnly(S,m){
+  const c=comps(S,m); let best=0,ba=0;
+  for(let i=1;i<c.n;i++){ const a=c.stats[i*5+4]; if(a>ba){ba=a;best=i;} }
+  const out=new Uint8Array(SW*SH); if(!best) return out;
+  for(let i=0;i<out.length;i++) if(c.labels[i]===best) out[i]=255;
+  return out;
+}
+
+/* ============================================================
+   Stage 1: find the 4 black squares and straighten the photo
+   ============================================================ */
+function detectMarkers(img,S){
+  const gray=S.m(new cv.Mat()); cv.cvtColor(img,gray,cv.COLOR_RGBA2GRAY);
+  const w=gray.cols,h=gray.rows,M=CFG.marker;
+  const ww=Math.round(w*M.winW), hh=Math.round(h*M.winH);
+  const wins=[['top-left',0,0],['top-right',w-ww,0],['bottom-left',0,h-hh],['bottom-right',w-ww,h-hh]];
+  const k=kern(S,3), pts=[], missing=[];
+  for(const [name,x0,y0] of wins){
+    const roi=S.m(gray.roi(new cv.Rect(x0,y0,ww,hh)));
+    let best=null;
+    for(const t of M.thr){
+      const bin=S.m(new cv.Mat()); cv.threshold(roi,bin,t,255,cv.THRESH_BINARY_INV);
+      const op=S.m(new cv.Mat()); cv.morphologyEx(bin,op,cv.MORPH_OPEN,k);
+      const cs=S.m(new cv.MatVector()), hi=S.m(new cv.Mat());
+      cv.findContours(op,cs,hi,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+      for(let i=0;i<cs.size();i++){
+        const c=S.m(cs.get(i)); const area=cv.contourArea(c); const r=cv.boundingRect(c);
+        const rel=area/(w*h); if(rel<M.minRel||rel>M.maxRel) continue;
+        const fill=area/(r.width*r.height), asp=Math.min(r.width,r.height)/Math.max(r.width,r.height);
+        if(fill<M.minFill||asp<M.minAsp) continue;
+        const score=fill*asp*Math.sqrt(area);
+        if(!best||score>best.score){ const mo=cv.moments(c); best={score,x:x0+mo.m10/mo.m00,y:y0+mo.m01/mo.m00}; }
+      }
+    }
+    if(best) pts.push(best); else missing.push(name);
+  }
+  if(missing.length) return {ok:false,msg:'Could not find the black square in the '+missing.join(', ')+' corner'+(missing.length>1?'s':'')+'. Keep all 4 squares fully visible, sharp and not covered.'};
+  const [TL,TR,BL,BR]=pts, d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+  const wAvg=(d(TL,TR)+d(BL,BR))/2, hAvg=(d(TL,BL)+d(TR,BR))/2, ratio=wAvg/hAvg;
+  if(!(TL.x<TR.x&&BL.x<BR.x&&TL.y<BL.y&&TR.y<BR.y)||ratio<0.42||ratio>0.75)
+    return {ok:false,msg:'The four squares do not form the expected 12 x 21 cm rectangle (a shadow or hand may be mistaken for a square). Retake in even light with the paper flat.'};
+  return {ok:true,pts};
+}
+function findSheet(src,S){
+  const rot=S.m(new cv.Mat()); cv.rotate(src,rot,cv.ROTATE_90_CLOCKWISE);
+  const order=src.cols>src.rows?[rot,src]:[src,rot];
+  let firstMsg='';
+  for(const img of order){
+    const r=detectMarkers(img,S);
+    if(r.ok){
+      const [TL,TR,BL,BR]=r.pts;
+      const a=cv.matFromArray(4,1,cv.CV_32FC2,[TL.x,TL.y,TR.x,TR.y,BL.x,BL.y,BR.x,BR.y]); S.m(a);
+      const b=cv.matFromArray(4,1,cv.CV_32FC2,[40,40,520,40,40,880,520,880]); S.m(b);
+      const M=S.m(cv.getPerspectiveTransform(a,b));
+      const out=S.m(new cv.Mat());
+      cv.warpPerspective(img,out,M,new cv.Size(SW,SH),cv.INTER_LINEAR,cv.BORDER_REPLICATE,new cv.Scalar());
+      return out;
+    }
+    if(!firstMsg) firstMsg=r.msg;
+  }
+  throw new UserError(firstMsg);
+}
+
+/* ============================================================
+   Stage 2: the mask (find the fruit) + body (no stem, no thin tips)
+   ============================================================ */
+function segment(straight,S){
+  const rgb=S.m(new cv.Mat()); cv.cvtColor(straight,rgb,cv.COLOR_RGBA2RGB);
+  const lab=S.m(new cv.Mat()); cv.cvtColor(rgb,lab,cv.COLOR_RGB2Lab);
+  const labB=S.m(new cv.Mat()); cv.GaussianBlur(lab,labB,new cv.Size(5,5),0);
+  const hsv=S.m(new cv.Mat()); cv.cvtColor(rgb,hsv,cv.COLOR_RGB2HSV);
+  const d=labB.data, N=SW*SH;
+  // paper colour = median of a thin strip around the sheet edge
+  const sL=[],sA=[],sB=[], strip=14;
+  for(let y=0;y<SH;y++) for(let x=0;x<SW;x++){
+    if(x<strip||x>=SW-strip||y<strip||y>=SH-strip){ const i=(y*SW+x)*3; sL.push(d[i]); sA.push(d[i+1]); sB.push(d[i+2]); }
+  }
+  const L0=med(sL),A0=med(sA),B0=med(sB);
+  const raw=new Uint8Array(N);
+  for(let i=0;i<N;i++){
+    const L=d[i*3],a=d[i*3+1],b=d[i*3+2];
+    if(Math.hypot(a-A0,b-B0)>CFG.seg.chroma || (L0-L)>CFG.seg.darkDrop) raw[i]=255;
+  }
+  let m=matU8(S,raw);
+  const er=Math.round(CFG.seg.eraseCm*PX);
+  for(const [cx,cy] of [[40,40],[520,40],[40,880],[520,880]])
+    cv.rectangle(m,new cv.Point(cx-er,cy-er),new cv.Point(cx+er,cy+er),new cv.Scalar(0),-1);
+  const m2=S.m(new cv.Mat()); cv.morphologyEx(m,m2,cv.MORPH_OPEN,kern(S,5));
+  const m3=S.m(new cv.Mat()); cv.morphologyEx(m2,m3,cv.MORPH_CLOSE,kern(S,9));
+  let mask=matU8(S,largestOnly(S,m3));
+  // fill tiny holes only
+  const cs=S.m(new cv.MatVector()), hi=S.m(new cv.Mat());
+  cv.findContours(mask,cs,hi,cv.RETR_CCOMP,cv.CHAIN_APPROX_SIMPLE);
+  for(let i=0;i<cs.size();i++){
+    if(hi.data32S[i*4+3]>=0){ const c=S.m(cs.get(i)); if(cv.contourArea(c)<CFG.seg.holeCm2*PX*PX) cv.drawContours(mask,cs,i,new cv.Scalar(255),-1); }
+  }
+  const areaCm2=cv.countNonZero(mask)/(PX*PX);
+  if(areaCm2<CFG.seg.minCm2) throw new UserError('Could not find the fruit on the paper (found only '+areaCm2.toFixed(1)+' cm²). Put the fruit in the middle of the paper in even light.');
+  if(areaCm2>CFG.seg.maxCm2) throw new UserError('The fruit area looks too big ('+areaCm2.toFixed(0)+' cm²). A shadow, a hand or a coloured light may have been included.');
+
+  // rough width -> remove stem / thin tips with an opening (body mask)
+  const maxContour=(mat)=>{ const v=S.m(new cv.MatVector()), h=S.m(new cv.Mat()); cv.findContours(mat,v,h,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+    let best=null,ba=0; for(let i=0;i<v.size();i++){ const c=S.m(v.get(i)); const a=cv.contourArea(c); if(a>ba){ba=a;best=c;} } return best; };
+  const c0=maxContour(mask), r0=cv.minAreaRect(c0);
+  const widPx=Math.min(r0.size.width,r0.size.height);
+  let kk=Math.max(5,Math.round(0.3*widPx)); if(kk%2===0) kk++;
+  const bodyRaw=S.m(new cv.Mat()); cv.morphologyEx(mask,bodyRaw,cv.MORPH_OPEN,kern(S,kk));
+  let body=matU8(S,largestOnly(S,bodyRaw));
+  if(cv.countNonZero(body)<0.5*cv.countNonZero(mask)) body=mask;
+  const stemRemovedCm2=(cv.countNonZero(mask)-cv.countNonZero(body))/(PX*PX);
+
+  // shape numbers
+  const c1=maxContour(body), r1=cv.minAreaRect(c1);
+  const lenPx=Math.max(r1.size.width,r1.size.height), wPx=Math.min(r1.size.width,r1.size.height);
+  const hull=S.m(new cv.Mat()); cv.convexHull(c1,hull,false,true);
+  const area=cv.contourArea(c1), solidity=area/Math.max(1,cv.contourArea(hull));
+  const shape={ length_cm:lenPx/PX, width_cm:wPx/PX, aspect:lenPx/Math.max(1,wPx), solidity, area_cm2:area/(PX*PX), stem_removed_cm2:stemRemovedCm2 };
+  return { lab:labB, hsv, body, shape };
+}
+
+/* ============================================================
+   Auto-guess the fruit (same "eliminate + rank" idea as before, simplified)
+   ============================================================ */
+function guessFruit(shape,hueShare,brown){
+  const rng=(v,[a,b],tol)=>{ if(v>=a&&v<=b) return 1; const dist=v<a?a-v:v-b; return Math.max(0.05,1-dist/tol); };
+  const out=[];
+  for(const [k,f] of Object.entries(FRUITS)){
+    let s=rng(shape.width_cm,f.width,2)*rng(shape.aspect,f.aspect,f.aspect[0]*0.6);
+    let col=brown; for(const c of f.cols) col+=hueShare[c]||0;
+    s*=Math.max(0.3,Math.min(1,col));
+    // the fruit's main colour must be clearly present (separates orange / apple / tomato)
+    const main=Math.max(...f.main.map(c=>hueShare[c]||0));
+    s*=0.4+0.6*Math.min(1,(main+brown)/0.3);
+    out.push([k,s]);
+  }
+  const tot=out.reduce((a,b)=>a+b[1],0)||1;
+  return out.map(([k,s])=>[k,100*s/tot]).sort((a,b)=>b[1]-a[1]);
+}
+
+/* ============================================================
+   Stage 6 / 6b: freshness measurements on clean skin
+   ============================================================ */
+function measureSkin(seg,S){
+  const { lab,hsv,body }=seg, N=SW*SH, d=lab.data, h=hsv.data;
+  const skinM=S.m(new cv.Mat()); cv.erode(body,skinM,kern(S,2*Math.round(CFG.skin.erodeCm*PX)+1));
+  const skin=skinM.data;
+  const skinEdgeIn=S.m(new cv.Mat()); cv.erode(skinM,skinEdgeIn,kern(S,25));
+  const skinPx0=cv.countNonZero(skinM);
+  // glare = blown-out and colourless (HSV), made a bit bigger
+  const gl=new Uint8Array(N);
+  for(let i=0;i<N;i++) if(skin[i]&&h[i*3+1]<40&&h[i*3+2]>235) gl[i]=255;  // blown-out flash only; paler mould patches stay visible
+  const glD=S.m(new cv.Mat()); cv.dilate(matU8(S,gl),glD,kern(S,9));
+  const glare=glD.data;
+  const use=new Uint8Array(N); let skinPx=0;
+  for(let i=0;i<N;i++) if(skin[i]&&!glare[i]){ use[i]=1; skinPx++; }
+  const skinCm2=skinPx/(PX*PX);
+  const res={ skin_cm2:skinCm2, glare_pct:100*(1-skinPx/Math.max(1,skinPx0)), enough:skinCm2>=CFG.skin.minCm2 };
+  const overlay={ spots:new Uint8Array(N), wrinkles:new Uint8Array(N), mould:new Uint8Array(N) };
+  if(!res.enough) return {res,overlay,hueShare:{},brown:0};
+
+  const Lf=new Float32Array(N), Mf=new Float32Array(N), LM=new Float32Array(N);
+  for(let i=0;i<N;i++){ Lf[i]=d[i*3]; Mf[i]=use[i]; LM[i]=Lf[i]*Mf[i]; }
+  const Lmat=matF(S,Lf);
+  const num=blurF(S,matF(S,LM),30).data32F, den=blurF(S,matF(S,Mf),30).data32F;
+  const Ls=blurF(S,Lmat,1.5).data32F;
+  const bg=new Float32Array(N);
+  for(let i=0;i<N;i++) bg[i]=den[i]>0.05?num[i]/den[i]:Lf[i];
+
+  // colours: hue shares, brown share, typical chroma/lightness
+  const sh={red:0,orange:0,yellow:0,green:0,other:0}; let valid=0, brownN=0; const chs=[], Ls0=[];
+  for(let i=0;i<N;i+=1){
+    if(!use[i]) continue;
+    const L=d[i*3],a=d[i*3+1]-128,b=d[i*3+2]-128, ch=Math.hypot(a,b);
+    if((i&7)===0){ chs.push(ch); Ls0.push(L); }
+    if(L<40) continue;
+    valid++;
+    let hue=Math.atan2(b,a)*180/Math.PI; if(hue<0) hue+=360;
+    if(ch<12) sh.other++;
+    else if(hue<50) sh.red++; else if(hue<82) sh.orange++; else if(hue<110) sh.yellow++; else if(hue<200) sh.green++; else sh.other++;
+    if(L>=40&&L<=130&&ch>=10&&ch<=40&&hue>=45&&hue<=100) brownN++;
+  }
+  const hueShare={}; for(const k in sh) hueShare[k]=sh[k]/Math.max(1,valid);
+  const brown=brownN/Math.max(1,valid);
+  const medC=med(chs), medL=med(Ls0);
+  Object.assign(res,{ med_chroma:medC, med_L:medL, hue:hueShare, brown_share:brown });
+
+  // dark spots: darker than the skin around them, small blobs, not just the rim
+  const sp=new Uint8Array(N);
+  for(let i=0;i<N;i++) if(use[i]&&Ls[i]<bg[i]-CFG.spot.drop) sp[i]=255;
+  const spO=S.m(new cv.Mat()); cv.morphologyEx(matU8(S,sp),spO,cv.MORPH_OPEN,kern(S,3));
+  const c=comps(S,spO), minPx=CFG.spot.minBlobCm2*PX*PX;
+  const tot=new Int32Array(c.n), edge=new Int32Array(c.n), ein=skinEdgeIn.data;
+  for(let i=0;i<N;i++){ const l=c.labels[i]; if(l>0){ tot[l]++; if(!ein[i]) edge[l]++; } }
+  let spotPx=0, spotN=0; const keep=new Uint8Array(c.n);
+  for(let l=1;l<c.n;l++) if(tot[l]>=minPx&&edge[l]/tot[l]<CFG.spot.edgeShare){ keep[l]=1; spotPx+=tot[l]; spotN++; }
+  for(let i=0;i<N;i++){ const l=c.labels[i]; if(l>0&&keep[l]) overlay.spots[i]=1; }
+  res.spot_pct=100*spotPx/skinPx; res.spot_count=spotN;
+
+  // possible mould: whitish / blue-green patches that do not fit the fruit's own colour
+  res.mould_pct=null; res.mould_count=0;
+  if(medC>=CFG.mould.minSkinChroma){
+    const mc=new Uint8Array(N), fruitGreen=hueShare.green>0.35;
+    for(let i=0;i<N;i++){
+      if(!use[i]) continue;
+      const L=d[i*3],a=d[i*3+1]-128,b=d[i*3+2]-128,ch=Math.hypot(a,b);
+      let hue=Math.atan2(b,a)*180/Math.PI; if(hue<0) hue+=360;
+      const whitish=ch<CFG.mould.chromaFrac*medC && L>bg[i]+CFG.mould.lightRise && L<235;
+      const blueGreen=!fruitGreen && ch>=10 && hue>=155 && hue<=260;
+      if(whitish||blueGreen) mc[i]=255;
+    }
+    const mO=S.m(new cv.Mat()); cv.morphologyEx(matU8(S,mc),mO,cv.MORPH_OPEN,kern(S,5));
+    const cm=comps(S,mO), mt=new Int32Array(cm.n), me=new Int32Array(cm.n);
+    for(let i=0;i<N;i++){ const l=cm.labels[i]; if(l>0){ mt[l]++; if(!ein[i]) me[l]++; } }
+    let mpx=0,mn=0; const mk=new Uint8Array(cm.n), mmin=CFG.mould.minBlobCm2*PX*PX;
+    for(let l=1;l<cm.n;l++) if(mt[l]>=mmin&&me[l]/mt[l]<0.6){ mk[l]=1; mpx+=mt[l]; mn++; }
+    for(let i=0;i<N;i++){ const l=cm.labels[i]; if(l>0&&mk[l]) overlay.mould[i]=1; }
+    res.mould_pct=100*mpx/skinPx; res.mould_count=mn;
+  }
+
+  // wrinkles: thin, long, dark creases (Hessian valley detector)
+  const Lg=blurF(S,Lmat,CFG.wrinkle.sigma);
+  const sx=S.m(new cv.Mat()), sy=S.m(new cv.Mat()), sxy=S.m(new cv.Mat());
+  cv.Sobel(Lg,sx,cv.CV_32F,2,0,3,0.25); cv.Sobel(Lg,sy,cv.CV_32F,0,2,3,0.25); cv.Sobel(Lg,sxy,cv.CV_32F,1,1,3,0.25);
+  const wskin=S.m(new cv.Mat()); cv.erode(matU8(S,use.map(v=>v?255:0)),wskin,kern(S,2*Math.round(CFG.wrinkle.extraErodeCm*PX)+1));
+  const xx=sx.data32F,yy=sy.data32F,xy=sxy.data32F,ws=wskin.data, vl=new Uint8Array(N);
+  for(let i=0;i<N;i++){
+    if(!ws[i]) continue;
+    const mean=(xx[i]+yy[i])/2, t=Math.hypot((xx[i]-yy[i])/2,xy[i]);
+    const l1=mean+t, l2=mean-t;
+    if(l1>CFG.wrinkle.thr && Math.abs(l2)<CFG.wrinkle.ratio*l1) vl[i]=255;
+  }
+  const vc=S.m(new cv.Mat()); cv.morphologyEx(matU8(S,vl),vc,cv.MORPH_CLOSE,kern(S,3));
+  const wc=comps(S,vc); let lenPx=0, wn=0; const wk=new Uint8Array(wc.n);
+  for(let l=1;l<wc.n;l++){
+    const bw=wc.stats[l*5+2],bh=wc.stats[l*5+3],a=wc.stats[l*5+4], L=Math.hypot(bw,bh);
+    if(L>=CFG.wrinkle.minLenCm*PX && a/L<=CFG.wrinkle.maxThickCm*PX){ wk[l]=1; lenPx+=L; wn++; }
+  }
+  for(let i=0;i<N;i++){ const l=wc.labels[i]; if(l>0&&wk[l]) overlay.wrinkles[i]=1; }
+  res.wrinkle_cm_per_cm2=(lenPx/PX)/skinCm2; res.wrinkle_count=wn;
+  return {res,overlay,hueShare,brown};
+}
+
+/* ============================================================
+   Stage 8: the freshness decision (rules, no learning)
+   Every cue starts with 0 penalty. A cue that cannot be measured = no effect.
+   ============================================================ */
+function judge(fruitKey,shape,m){
+  const f=FRUITS[fruitKey], cues=[]; let pen=0, spoiled=false;
+  const add=(type,text)=>cues.push({type,text});
+  const r=m.res;
+  if(!r.enough){
+    add('na','Not enough clean skin is visible ('+r.skin_cm2.toFixed(1)+' cm²). Turn the fruit so a larger side faces the camera, with less glare.');
+    return { score:null, verdict:'Cannot tell', emoji:'❔', color:'#5d6b62', sub:'The photo does not show enough skin to judge.', cues };
+  }
+  const tol = fruitKey==='banana'?0.5:1;
+
+  // dark spots
+  { const p=r.spot_pct;
+    if(p<0.5) add('ok','Skin is clean: almost no dark spots.');
+    else { const x=clamp(p*1.5*tol,0,35); pen+=x;
+      const t='Dark spots cover '+p.toFixed(1)+'% of the skin ('+r.spot_count+' patch'+(r.spot_count>1?'es':'')+').';
+      add(x>=15?'bad':'warn', t+(fruitKey==='banana'?' Brown speckles are normal on a ripe banana, so they count less.':'')); } }
+
+  // brown colour
+  { const p=100*m.brown;
+    if(p<5) add('ok','No browning of the colour.');
+    else { const x=clamp((p-5)*0.6*tol,0,30); pen+=x; add(x>=12?'bad':'warn','Brownish colour on '+p.toFixed(0)+'% of the skin.'); } }
+
+  // wrinkles (presence only counts)
+  { const dns=r.wrinkle_cm_per_cm2;
+    if(dns<0.05) add('ok','Skin looks smooth, no shrivelling seen.');
+    else { const x=clamp((dns-0.05)*60,0,25); pen+=x; add(x>=12?'bad':'warn','Wrinkles / creases found ('+r.wrinkle_count+' long creases). The fruit may be drying out.'); } }
+
+  // mould
+  if(r.mould_pct===null) add('na','Mould check skipped (skin colour too pale to compare).');
+  else if(r.mould_pct>=1){ pen+=25+clamp(r.mould_pct*4,0,35); if(r.mould_pct>=2) spoiled=true;
+    add('bad','Possible mould: pale or blue-green patches on '+r.mould_pct.toFixed(1)+'% of the skin. Please look at it closely, and do not eat it if it is mould.'); }
+  else add('ok','No mould-like patches.');
+
+  // fruit-specific colour rules
+  const h=r.hue;
+  if(fruitKey==='cucumber'&&(h.yellow+h.orange)>0.08){ const x=clamp(((h.yellow+h.orange)-0.08)*100*0.8,0,30); pen+=x; add(x>=12?'bad':'warn','Yellowing on '+(100*(h.yellow+h.orange)).toFixed(0)+'% of the skin. A fresh cucumber is green.'); }
+  if(fruitKey==='capsicum'&&h.green>0.2&&h.yellow>0.2){ pen+=10; add('warn','Green capsicum turning yellow ('+(100*h.yellow).toFixed(0)+'% yellow). It is ageing.'); }
+  if((fruitKey==='tomato'||fruitKey==='orange')&&h.green>0.3) add('warn','Mostly green ('+(100*h.green).toFixed(0)+'%): it is probably not ripe yet. That is not the same as spoiled.');
+  if(fruitKey==='lemon'&&h.green>0.4) add('warn','Greenish ('+(100*h.green).toFixed(0)+'%): the lemon may be unripe.');
+
+  // shape sanity for the chosen fruit
+  if(shape.width_cm<f.width[0]-1.5||shape.width_cm>f.width[1]+1.5||shape.aspect<f.aspect[0]*0.6||shape.aspect>f.aspect[1]*1.6)
+    add('warn','The shape and size ('+shape.length_cm.toFixed(1)+' x '+shape.width_cm.toFixed(1)+' cm) look unusual for a '+f.label.toLowerCase()+'. Check the fruit choice.');
+
+  const score=Math.round(clamp(100-pen,0,100)), G=CFG.grade;
+  let verdict,emoji,color,sub;
+  if(spoiled||score<G.old){ verdict='Likely spoiled'; emoji='🤢'; color='#c62828'; sub='Several signs of decay. Not recommended to eat.'; }
+  else if(score<G.ok){ verdict='Getting old'; emoji='😕'; color='#e65100'; sub='Use it today, or cut away the bad parts if it is still firm.'; }
+  else if(score<G.fresh){ verdict='Still okay'; emoji='🙂'; color='#c77700'; sub='A few signs of age. Eat it soon.'; }
+  else { verdict='Fresh'; emoji='😋'; color='#2e7d32'; sub='No clear signs of decay.'; }
+  return { score, verdict, emoji, color, sub, cues };
+}
+
+/* ============================================================
+   Full pipeline on one photo (a cv.Mat in RGBA)
+   ============================================================ */
+function analyzeMat(src,fruitChoice){
+  const S=Scope();
+  try{
+    const straight=findSheet(src,S);
+    const seg=segment(straight,S);
+    const meas=measureSkin(seg,S);
+    let guess=null, key=fruitChoice;
+    if(!meas.res.enough && fruitChoice==='auto') guess=[['apple',0]];
+    else if(fruitChoice==='auto'){ guess=guessFruit(seg.shape,meas.hueShare,meas.brown); key=guess[0][0]; }
+    const verdict=judge(key,seg.shape,meas);
+    // picture for the screen
+    const body=seg.body.data, N=SW*SH, px=new Uint8ClampedArray(straight.data);
+    const blend=(i,r,g,b,a)=>{ px[i*4]=px[i*4]*(1-a)+r*a; px[i*4+1]=px[i*4+1]*(1-a)+g*a; px[i*4+2]=px[i*4+2]*(1-a)+b*a; px[i*4+3]=255; };
+    let x0=SW,y0=SH,x1=0,y1=0;
+    for(let y=0;y<SH;y++) for(let x=0;x<SW;x++){
+      const i=y*SW+x; if(!body[i]) continue;
+      if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+      if(meas.overlay.spots[i]) blend(i,255,59,48,0.65);
+      if(meas.overlay.wrinkles[i]) blend(i,0,229,255,0.9);
+      if(meas.overlay.mould[i]) blend(i,255,43,214,0.7);
+      const edge=(x>0&&!body[i-1])||(x<SW-1&&!body[i+1])||(y>0&&!body[i-SW])||(y<SH-1&&!body[i+SW]);
+      if(edge) blend(i,57,255,20,1);
+    }
+    const pad=30; x0=Math.max(0,x0-pad); y0=Math.max(0,y0-pad); x1=Math.min(SW-1,x1+pad); y1=Math.min(SH-1,y1+pad);
+    const nums={ fruit:key, length_cm:seg.shape.length_cm, width_cm:seg.shape.width_cm, aspect:seg.shape.aspect, solidity:seg.shape.solidity,
+      skin_cm2:meas.res.skin_cm2, glare_pct:meas.res.glare_pct, spot_pct:meas.res.spot_pct, spot_count:meas.res.spot_count,
+      brown_pct:100*(meas.brown||0), wrinkle_cm_per_cm2:meas.res.wrinkle_cm_per_cm2, wrinkle_count:meas.res.wrinkle_count,
+      mould_pct:meas.res.mould_pct, hue_red:meas.hueShare.red, hue_orange:meas.hueShare.orange, hue_yellow:meas.hueShare.yellow, hue_green:meas.hueShare.green,
+      score:verdict.score };
+    return { key, guess:fruitChoice==='auto'?guess:null, verdict, nums, image:{ data:px, x0,y0,w:x1-x0+1,h:y1-y0+1 } };
+  } finally { S.free(); }
+}
+function analyzeCanvas(canvas,fruitChoice){
+  const S=Scope(); try{ const src=S.m(cv.imread(canvas)); return analyzeMat(src,fruitChoice); } finally { S.free(); }
+}
+
+/* ============================================================
+   Screen (only runs in a browser)
+   ============================================================ */
+if(typeof document!=='undefined'){
+  const $=id=>document.getElementById(id);
+  const status=(t,err)=>{ $('status').textContent=t; $('status').className=err?'err':''; };
+  let ready=false, lastNums=null;
+  $('pickBtn').style.opacity=0.5; $('file').disabled=true;
+
+  function cvReady(){
+    const mark=()=>{ ready=true; $('file').disabled=false; $('pickBtn').style.opacity=1; status('Ready. Choose a photo.'); };
+    const t=setInterval(()=>{
+      if(!window.cv) return;
+      clearInterval(t);
+      if(window.cv instanceof Promise){ window.cv.then(m=>{ window.cv=m; mark(); }); }
+      else if(window.cv.Mat){ mark(); }
+      else { window.cv.onRuntimeInitialized=mark; }
+    },100);
+  }
+  const s=document.createElement('script');
+  s.async=true; s.src='https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-release.1/dist/opencv.js';
+  s.onerror=()=>status('Could not load the detector. Check the internet connection and reload.',true);
+  document.head.appendChild(s); cvReady();
+
+  $('file').addEventListener('change',e=>{
+    const f=e.target.files&&e.target.files[0]; if(!f||!ready) return;
+    status('Reading the photo…'); $('result').style.display='none';
+    const img=new Image();
+    img.onload=()=>{
+      const mx=1800, sc=Math.min(1,mx/Math.max(img.naturalWidth,img.naturalHeight));
+      const c=document.createElement('canvas'); c.width=Math.round(img.naturalWidth*sc); c.height=Math.round(img.naturalHeight*sc);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(img.src);
+      status('Analysing…');
+      setTimeout(()=>{
+        try{ show(analyzeCanvas(c,$('fruit').value)); status('Done. Choose another photo any time.'); }
+        catch(err){ status(err instanceof UserError?err.message:'Something went wrong: '+(err&&err.message||err),true); console.error(err); }
+        e.target.value='';
+      },50);
+    };
+    img.onerror=()=>status('This photo could not be opened.',true);
+    img.src=URL.createObjectURL(f);
+  });
+
+  function show(r){
+    const F=FRUITS[r.key], v=r.verdict;
+    $('vBadge').textContent=v.emoji; $('vTitle').textContent=v.verdict; $('vTitle').style.color=v.color; $('vSub').textContent=v.sub;
+    $('vBar').style.width=(v.score===null?0:v.score)+'%'; $('vBar').style.background=v.color;
+    let guessTxt='';
+    if(r.guess&&r.guess[0][1]>0){ guessTxt=' · guessed '+F.label.toLowerCase()+' ('+Math.round(r.guess[0][1])+'%)'+(r.guess[1]?', next '+FRUITS[r.guess[1][0]].label.toLowerCase()+' '+Math.round(r.guess[1][1])+'%':'')+'. Pick the fruit above if this is wrong.'; }
+    $('vScore').textContent=(v.score===null?'':'Freshness score '+v.score+' / 100 · ')+F.emoji+' '+F.label+guessTxt;
+    const ic={ok:'✓',warn:'!',bad:'✕',na:'–'};
+    $('cues').innerHTML=v.cues.map(c=>'<li class="t-'+c.type+'"><span class="ic">'+ic[c.type]+'</span><span>'+c.text+'</span></li>').join('');
+    const im=r.image, cv2=$('view'); cv2.width=im.w; cv2.height=im.h;
+    const full=document.createElement('canvas'); full.width=SW; full.height=SH;
+    full.getContext('2d').putImageData(new ImageData(im.data,SW,SH),0,0);
+    cv2.getContext('2d').drawImage(full,im.x0,im.y0,im.w,im.h,0,0,im.w,im.h);
+    lastNums=r.nums;
+    $('nums').innerHTML=Object.entries(r.nums).map(([k,x])=>'<tr><td>'+k+'</td><td>'+(typeof x==='number'?(Math.abs(x)<5?x.toFixed(3):x.toFixed(1)):x)+'</td></tr>').join('');
+    $('result').style.display='block'; $('result').scrollIntoView({behavior:'smooth'});
+  }
+  $('copyBtn').addEventListener('click',()=>{
+    const t=JSON.stringify(lastNums,null,1);
+    (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>status('Numbers copied.'),()=>{ prompt('Copy these numbers:',t); });
+  });
+}
+</script>
+</body>
+</html>
